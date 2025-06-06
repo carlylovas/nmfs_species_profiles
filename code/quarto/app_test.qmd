@@ -1,0 +1,202 @@
+---
+title: "Marine Species Explorer"
+format:
+  html: 
+    toc: true
+    self-contained: true
+    grid: 
+      body-width: 1100px
+server: shiny
+---
+
+```{r setup, include=FALSE}
+# Libraries ----
+library(tidyverse)
+library(matrixStats)
+library(bslib)
+library(shiny)
+library(rnaturalearth)
+
+# Read in cleaned survey data ----
+clean_survey <- read_rds(here::here("data","clean_survey.rds")) |>
+  filter(!year %in% c(2017,2020))
+
+## Contains species caught in >5 tows per year, and present in both seasons >80% of the years of the survey 
+## Does not include strata needed to compute stratified abundances 
+
+# Species list ----
+spp_class <- readr::read_csv(here::here("data", "sppclass.csv"))
+spp_class <- janitor::clean_names(spp_class) |>
+  select(svspp, common_name) |>
+  mutate(comname = str_to_sentence(common_name)) |>
+  drop_na() |>
+  filter(comname %in% clean_survey$comname) |>
+  arrange(comname)
+
+# Biomass weighted means ----
+center_bio <- function(x, ...){
+  x |>
+    group_by(comname, ...) %>%
+    summarise(
+      decade          = 10*year%/%10,
+      # Un-weighted averages
+      total_biomass   = sum(total_biomass_kg),
+      avg_biomass     = mean(total_biomass_kg),
+      biomass_sd      = sd(total_biomass_kg),
+      # Weighted averages
+      avg_lat         = weightedMean(lat, w = total_biomass_kg, na.rm = T),  
+      avg_lon         = weightedMean(lon, w = total_biomass_kg, na.rm = T),
+      avg_sst         = weightedMean(surftemp, w = total_biomass_kg, na.rm = T),
+      avg_bot         = weightedMean(bottemp,  w = total_biomass_kg, na.rm = T),
+      avg_depth       = weightedMean(depth, w = total_biomass_kg, na.rm = T),
+      .groups = "drop")
+}
+
+# Plotting data ----
+weighted_dat  <- center_bio(clean_survey, year)
+seasonal_dat  <- center_bio(clean_survey, year, season)
+species <- spp_class$comname
+
+# Basemaps ---- 
+usa <- ne_states(country = "united states of america")
+can <- ne_states(country = "canada") 
+
+# Custom theme function (replacement for theme_gmri)
+theme_custom <- function() {
+  theme_minimal() +
+    theme(
+      rect = element_rect(fill = "#222222"),
+      text = element_text(color = "#e9e9e9"),
+      axis.line.x = element_blank(),
+      axis.title = element_blank(),
+      panel.grid.major = element_line(color = "#9a9a9a"),
+      panel.border = element_rect(color = "#6a6a6a", linetype = 1, fill = "transparent"),
+      panel.background = element_rect(fill = "#222222"),
+      plot.background = element_rect(fill = "#222222"),
+      plot.margin = margin(0,0,0,0, unit = "mm"),
+      plot.subtitle = element_text(size = 11)
+    )
+}
+```
+
+```{r}
+#| panel: sidebar
+#| 
+selectInput("comname", "Select species:", 
+            choices = species,
+            selected = species[1])
+hr()
+```
+
+
+## Distributions{.tabset}
+```{r}
+#| layout: [[1, 1]]
+#| height: 300px
+
+# Center of latitude plot
+plotOutput("latPlot")
+
+# Center of longitude plot
+plotOutput("lonPlot")
+```
+
+
+## Environmental 
+```{r}
+#| layout: [[1, 1], [1]]
+#| height: 250px
+
+# Sea surface temperature
+plotOutput("sstPlot")
+
+# Bottom temperature
+plotOutput("btPlot")
+
+# Depth
+plotOutput("depthPlot")
+```
+
+::: {.panel-tabset}
+
+## Maps
+```{r, .panel-tabset}
+#| height: 400px
+
+# Seasonal centers map
+plotOutput("seasonMap")
+```
+
+```{r}
+#| context: server
+
+## seasonal data
+filtered_season <- reactive({
+  seasonal_dat |>
+    filter(comname == input$comname)
+})
+
+## annual data
+filtered_annual <- reactive({
+  weighted_dat |>
+    filter(comname == input$comname)
+})
+
+# Map (annual for now...)
+output$seasonMap <- renderPlot({
+  ggplot() +
+    geom_sf(data = usa, fill = "#6a6a6a", color = "#9a9a9a") + 
+    geom_sf(data = can, fill = "#6a6a6a", color = "#9a9a9a") +
+    coord_sf(xlim = c(-66, -78), ylim = c(35,45)) +
+    geom_point(data = filtered_season(), aes(x = avg_lon, y = avg_lat, color = season)) + 
+    facet_wrap(~decade, nrow = 2) +
+    theme_custom()
+})
+
+# Lat plot
+output$latPlot <- renderPlot({
+  ggplot(filtered_annual()) +
+    geom_line(aes(x=year, y=avg_lat), linewidth = 0.8)+
+    geom_point(aes(x = year, y = avg_lat),size=0.5) +
+    ggtitle("Center of latitude", subtitle = "Weighted by biomass") +
+    theme_custom()
+})
+
+# Lon plot
+output$lonPlot <- renderPlot({
+  ggplot(filtered_annual()) +
+    geom_line(aes(x=year, y=avg_lon), linewidth = 0.8)+
+    geom_point(aes(x = year, y = avg_lon),size=0.5) +
+    ggtitle("Center of longitude", subtitle = "Weighted by biomass") +
+    theme_custom()
+})
+
+# SST plot
+output$sstPlot <- renderPlot({
+  ggplot(filtered_annual()) +
+    geom_line(aes(x=year, y=avg_sst), linewidth = 0.8)+
+    geom_point(aes(x = year, y = avg_sst),size=0.5) +
+    ggtitle("Average Sea Surface Temperature", subtitle = "Weighted by biomass") +
+    theme_custom()
+})
+
+# BT plot
+output$btPlot <- renderPlot({
+  ggplot(filtered_annual()) +
+    geom_line(aes(x=year, y=avg_bot), linewidth = 0.8)+
+    geom_point(aes(x = year, y = avg_bot),size=0.5) +
+    ggtitle("Average Bottom Temperature", subtitle = "Weighted by biomass") +
+    theme_custom()
+})
+
+# Depth plot
+output$depthPlot <- renderPlot({
+  ggplot(filtered_annual()) +
+    geom_line(aes(x=year, y=avg_depth), linewidth = 0.8)+
+    geom_point(aes(x = year, y = avg_depth),size=0.5) +
+    scale_y_reverse() +
+    ggtitle("Average Depth", subtitle = "Weighted by biomass") +
+    theme_custom()
+})
+```
+
