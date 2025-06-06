@@ -24,6 +24,7 @@ library(gmRi)
 library(matrixStats)
 library(shiny)
 library(rnaturalearth)
+library(rsconnect)
 
 # Read in cleaned survey data ----
 clean_survey <- read_rds(here("data","clean_survey.rds")) |>
