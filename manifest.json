@@ -5,7 +5,7 @@
   "metadata": {
     "appmode": "static",
     "primary_rmd": null,
-    "primary_html": "code/shiny_test.html",
+    "primary_html": "code/quarto/app_test.html",
     "content_category": null,
     "has_parameters": false
   },
@@ -14,11 +14,20 @@
     "code/clean_trawl.R": {
       "checksum": "be40c3d184242fe428a7d4d562e8fe56"
     },
-    "code/shiny_test.html": {
-      "checksum": "a81a3a3dde46e280a93186c3bcba0e8c"
+    "code/quarto/app_test.html": {
+      "checksum": "9457834bd26a51d2f90f1cb6fe65cddf"
     },
-    "code/shiny_test.qmd": {
-      "checksum": "191c0f6470be84c670e57974b7919306"
+    "code/quarto/app_test.qmd": {
+      "checksum": "8898358d14c3f52e4c8744ed595fda10"
+    },
+    "code/quarto/shiny_test.html": {
+      "checksum": "292f935f2ce9018ff17eefaef2200d2d"
+    },
+    "code/quarto/shiny_test.qmd": {
+      "checksum": "e353385a49a2c264341eee9fbc51eb1e"
+    },
+    "code/shiny/app.R": {
+      "checksum": "e840dac9cc41b70fa3c37f226e6713d7"
     },
     "data/clean_survey.rds": {
       "checksum": "2fb1ea4ae603dcb22e15b06c439453d9"
