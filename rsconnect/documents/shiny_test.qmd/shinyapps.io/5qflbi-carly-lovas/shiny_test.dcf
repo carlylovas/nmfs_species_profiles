@@ -1,0 +1,15 @@
+name: shiny_test
+title: shiny_test
+username: 5qflbi-carly-lovas
+account: 5qflbi-carly-lovas
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 14914715
+bundleId: 10433446
+url: https://5qflbi-carly-lovas.shinyapps.io/shiny_test/
+version: 1
+quarto_version: 1.3.450
+quarto_engines: knitr
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: data/survdat_lw.rds|code

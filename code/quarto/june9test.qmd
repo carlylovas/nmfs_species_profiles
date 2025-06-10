@@ -12,6 +12,9 @@ engine: shinylive
 
 ```{shinylive-r}
 #| standalone: true
+#| components: [viewer]
+#| viewerHeight: 800
+
 
 # Libraries ----
 library(tidyverse)
