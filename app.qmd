@@ -26,70 +26,54 @@ library(rnaturalearth)
 library(rsconnect)
 
 # Read in cleaned survey data ----
-clean_survey <- read_rds(here("data","clean_survey.rds")) |>
-  filter(!year %in% c(2017,2020))
+annual_centers <- read.csv(here("data", "annual_centers.csv"))
+seasonal_centers <- read.csv(here("data", "seasonal_centers.csv"))
+annual_percentiles <- read.csv(here("data", "annual_percentiles.csv"))
 
-## Contains species caught in >5 tows per year, and present in both seasons >80% of the years of the survey 
-## Does not include strata needed to compute stratified abundances 
-
-# Species list ----
-spp_class <- read_csv(here("data", "sppclass.csv"))
-spp_class <- janitor::clean_names(spp_class) |>
-  select(svspp, common_name) |>
-  mutate(comname = str_to_sentence(common_name)) |>
-  drop_na() |>
-  filter(comname %in% clean_survey$comname) |>
-  arrange(comname)
-
-# Biomass weighted means ----
-center_bio <- function(x, ...){
-  x |>
-    group_by(comname, ...) %>%
-    summarise(
-      decade          = 10*year%/%10,
-      # Un-weighted averages
-      total_biomass   = sum(total_biomass_kg),
-      avg_biomass     = mean(total_biomass_kg),
-      biomass_sd      = sd(total_biomass_kg),
-      # Weighted averages
-      avg_lat         = weightedMean(lat, w = total_biomass_kg, na.rm = T),  
-      avg_lon         = weightedMean(lon, w = total_biomass_kg, na.rm = T),
-      avg_sst         = weightedMean(surftemp, w = total_biomass_kg, na.rm = T),
-      avg_bot         = weightedMean(bottemp,  w = total_biomass_kg, na.rm = T),
-      avg_depth       = weightedMean(depth, w = total_biomass_kg, na.rm = T),
-      .groups = "drop")
-}
-
-# Plotting data ----
-weighted_dat  <- center_bio(clean_survey, year)
-seasonal_dat  <- center_bio(clean_survey, year, season)
-species <- spp_class$comname
+# Species input ----
+species <- annual_centers |>
+  select(comname) |> 
+  distinct()
+species <- species$comname
 
 # Basemaps ---- 
 usa <- ne_states(country = "united states of america", returnclass = "sf")
 can <- ne_states(country = "canada", returnclass = "sf") 
+
+# Means ----
+annual_means <- annual_centers |>
+  filter(year %in% c(1991:2022)) |> # 30 years with 2017,2020 removed
+  pivot_longer(cols = "avg_lat":"avg_depth", names_to = "variable", values_to = "measurement") |>
+  group_by(comname, variable) |>
+  summarise(mean = mean(measurement)) |>
+  pivot_wider(names_from = variable, values_from = "mean") |> 
+  rename_with(~ str_remove(., "avg_"), everything()) 
+
 ```
 
 ```{r}
 #| panel: fill
-#| layout: [[1], [1,1], [1,1], [1]]
 
 # Define UI
 fluidPage(
-  titlePanel("Marine Species Explorer"),
+  titlePanel("NMFS Species Distributions"),
   sidebarLayout(
     sidebarPanel(
+      width = 2,
       selectInput("comname", "Select species:", 
                   choices = species,
                   selected = species[1]),
       hr()
     ),
     mainPanel(
+      width = 10,
       tabsetPanel(
         tabPanel("Distributions", 
                  fluidRow(
-                   column(6, plotOutput("latPlot", height = "300px")),
-                   column(6, plotOutput("lonPlot", height = "300px"))
+                   column(5, plotOutput("latPlot", height = "300px")),
+                   column(7, plotOutput("latPercentile", height = "300px")),
+                   column(5, plotOutput("lonPlot", height = "300px")),
+                   column(7, plotOutput("lonPercentile", height = "300px"))
                  )
         ),
         tabPanel("Environmental", 
@@ -102,7 +86,9 @@ fluidPage(
                  )
         ),
         tabPanel("Maps", 
-                 plotOutput("seasonMap")
+                 fluidRow(
+                   column(12, plotOutput("seasonMap", height = "400px"))
+                 )
         )
       )
     )
@@ -117,19 +103,27 @@ fluidPage(
 #| message: false
 
 # Filter data based on species selection ----
+
 ## seasonal data
 filtered_season <- reactive({
-  seasonal_dat |>
+  seasonal_centers |>
     filter(comname == input$comname)
 })
 
 ## annual data
 filtered_annual <- reactive({
-  weighted_dat |>
+  annual_centers |>
+    left_join(annual_means) |>
     filter(comname == input$comname)
 })
 
-# Map (annual for now...)
+## percentiles
+filtered_percentiles <- reactive({
+  annual_percentiles|>
+    filter(comname == input$comname)
+})
+
+# Map
 output$seasonMap <- renderPlot({
   ggplot() +
     geom_sf(data = usa) + geom_sf(data = can) +
@@ -141,6 +135,7 @@ output$seasonMap <- renderPlot({
     facet_wrap(~decade, nrow = 2) +
     scale_color_gmri() +
     theme_gmri(
+      axis.title = element_blank(),
       legend.position = "bottom", 
       strip.background = element_rect(fill = "transparent"),
       strip.text = element_text(color = "#000000"), 
@@ -148,23 +143,29 @@ output$seasonMap <- renderPlot({
       plot.margin = ( plot.margin = margin(0,0,0,0)))
 })
 
-# Lat plt
+# Lat plot
 output$latPlot <- renderPlot({
   ggplot(filtered_annual()) +
-      geom_line(aes(x=year, y=avg_lat), linewidth = 0.8)+
-      geom_point(aes(x = year, y = avg_lat),size=0.5) +
-      ggtitle("Center of latitude", subtitle = "Weighted by biomass") +
+      # geom_line(aes(x=year, y=(zoo::rollapplyr(avg_lat, width = 5, FUN = mean, align = "center", partial = T))), 
+      #           linetype = 2, color = "#b94a40", linewidth = 1) + 
+      geom_line(aes(x=year, y=avg_lat), linewidth = 0.8, alpha = 0.5)+
+      geom_line(aes(x=year, y=lat), linetype = 2, linewidth = 1, color = "#07a3b7") + 
+      ggtitle("Center of latitude", subtitle = "Average latitude weighted by biomass") +
+      ylab("Latitude") +
       theme_gmri(
+        axis.title.x  = element_blank(), 
         plot.subtitle = element_text(size = 11))
 })
 
-# Lon plt
+# Lon plot
 output$lonPlot <- renderPlot({
   ggplot(filtered_annual()) +
-      geom_line(aes(x=year, y=avg_lon), linewidth = 0.8)+
-      geom_point(aes(x = year, y = avg_lon),size=0.5) +
-      ggtitle("Center of longitude", subtitle = "Weighted by biomass") +
+      geom_line(aes(x=year, y=avg_lon), linewidth = 0.8, alpha = 0.5)+
+      geom_line(aes(x=year, y=lon), linetype = 2, linewidth = 1, color = "#ebcb27") +
+      ggtitle("Center of longitude", subtitle = "Average longitude weighted by biomass") +
+      ylab("Longitude") +
       theme_gmri(
+        axis.title.x  = element_blank(),
         plot.subtitle = element_text(size = 11))
 })
 
@@ -172,10 +173,12 @@ output$lonPlot <- renderPlot({
 # SST plot
 output$sstPlot <- renderPlot({
   ggplot(filtered_annual()) +
-      geom_line(aes(x=year, y=avg_sst), linewidth = 0.8)+
-      geom_point(aes(x = year, y = avg_sst),size=0.5) +
+      geom_line(aes(x=year, y=avg_sst), linewidth = 0.8, alpha = 0.5)+
+      geom_line(aes(x = year, y=sst), color = "#b94a40", linetype = 2, linewidth = 1) +
       ggtitle("Average Sea Surface Temperature", subtitle = "Weighted by biomass") +
-       theme_gmri(
+      ylab("Temperature") +
+      theme_gmri(
+        axis.title.x  = element_blank(),
         plot.subtitle = element_text(size = 11))
 })
 
@@ -183,9 +186,11 @@ output$sstPlot <- renderPlot({
 output$btPlot <- renderPlot({
   ggplot(filtered_annual()) +
       geom_line(aes(x=year, y=avg_bot), linewidth = 0.8)+
-      geom_point(aes(x = year, y = avg_bot),size=0.5) +
+      geom_line(aes(x = year, y = bot), color = "#004966", linetype = 2, linewidth = 1) +
       ggtitle("Average Bottom Temperature", subtitle = "Weighted by biomass") +
+      ylab("Temperature") +
       theme_gmri(
+        axis.title.x  = element_blank(),
         plot.subtitle = element_text(size = 11))
 })
 
@@ -193,11 +198,51 @@ output$btPlot <- renderPlot({
 output$depthPlot <- renderPlot({
   ggplot(filtered_annual()) +
       geom_line(aes(x=year, y=avg_depth), linewidth = 0.8)+
-      geom_point(aes(x = year, y = avg_depth),size=0.5) +
+      geom_line(aes(x = year, y = depth), color = "#773891", linetype = 2, linewidth = 1) +
       scale_y_reverse() +
       ggtitle("Average Depth", subtitle = "Weighted by biomass") +
+      ylab("Depth") +
       theme_gmri(
+        axis.title.x  = element_blank(),
         plot.subtitle = element_text(size = 11))
 })
 
+# Percentiles 
+## Lat
+output$latPercentile <- renderPlot({
+  ggplot(reactive({
+  annual_percentiles|>
+      mutate(factor = factor(percentiles, levels = c("5%","25%","50%","75%","95%"))) |>
+      filter(variable == "lat" & comname == input$comname)
+})()) +
+      geom_line(aes(x = year, y = roll_mean, color = factor), linetype = 2, linewidth = 1) +
+      geom_line(aes(x = year, y = measurement, color = factor), alpha = 0.25, linewidth = 1) +
+      ggtitle("Biomass-weighted latitude percentiles", subtitle = "5-year rolling mean represented by dashed line") +
+      ylab("Latitude") +
+      scale_color_gmri() +
+    theme_gmri(
+      axis.title.x = element_blank(),
+      plot.subtitle = element_text(size = 11),
+      legend.position = "right"
+    )
+})
+
+## Lon
+output$lonPercentile <- renderPlot({
+  ggplot(reactive({
+  annual_percentiles|>
+       mutate(factor = factor(percentiles, levels = c("5%","25%","50%","75%","95%"))) |>
+       filter(variable == "lon" & comname == input$comname)
+})()) +
+      geom_line(aes(x = year, y = roll_mean,   color = factor), linetype = 2, linewidth = 1) +
+      geom_line(aes(x = year, y = measurement, color = factor), alpha = 0.25, linewidth = 1) +
+      ggtitle("Biomass-weighted longitude percentiles", subtitle = "5-year rolling mean represented by dashed line") +
+      ylab("Longitude") +
+      scale_color_gmri() +
+    theme_gmri(
+      axis.title.x = element_blank(),
+      plot.subtitle = element_text(size = 11),
+      legend.position = "right"
+    )
+})
 ```

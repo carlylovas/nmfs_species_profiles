@@ -2991,13 +2991,12 @@ vertical-align: -.125em;
 
 <div class="panel-fill panel-grid">
 <div class="g-col-24">
-<div class="cell panel-fill quarto-layout-panel">
-<div class="quarto-layout-row quarto-layout-valign-top">
-<div class="cell-output-display quarto-layout-cell no-overflow-x" style="flex-basis: 100.0%;justify-content: center;">
+<div class="cell panel-fill">
+<div class="cell-output-display no-overflow-x">
 <div class="container-fluid">
-<h2 class="anchored">Marine Species Explorer</h2>
+<h2 class="anchored">NMFS Species Distributions</h2>
 <div class="row">
-<div class="col-sm-4">
+<div class="col-sm-2">
 <form class="well" role="complementary">
 <div class="form-group shiny-input-container">
 <label class="control-label" id="comname-label" for="comname">Select species:</label>
@@ -3029,7 +3028,6 @@ vertical-align: -.125em;
 <option value="Pollock">Pollock</option>
 <option value="Red hake">Red hake</option>
 <option value="Scup">Scup</option>
-<option value="Scup">Scup</option>
 <option value="Sea raven">Sea raven</option>
 <option value="Sea scallop">Sea scallop</option>
 <option value="Silver hake">Silver hake</option>
@@ -3050,31 +3048,37 @@ vertical-align: -.125em;
 <hr>
 </form>
 </div>
-<div class="col-sm-8" role="main">
+<div class="col-sm-10" role="main">
 <div class="tabbable">
-<ul class="nav nav-tabs" data-tabsetid="9832">
+<ul class="nav nav-tabs" data-tabsetid="2156">
 <li class="active">
-<a href="#tab-9832-1" data-toggle="tab" data-bs-toggle="tab" data-value="Distributions">Distributions</a>
+<a href="#tab-2156-1" data-toggle="tab" data-bs-toggle="tab" data-value="Distributions">Distributions</a>
 </li>
 <li>
-<a href="#tab-9832-2" data-toggle="tab" data-bs-toggle="tab" data-value="Environmental">Environmental</a>
+<a href="#tab-2156-2" data-toggle="tab" data-bs-toggle="tab" data-value="Environmental">Environmental</a>
 </li>
 <li>
-<a href="#tab-9832-3" data-toggle="tab" data-bs-toggle="tab" data-value="Maps">Maps</a>
+<a href="#tab-2156-3" data-toggle="tab" data-bs-toggle="tab" data-value="Maps">Maps</a>
 </li>
 </ul>
-<div class="tab-content" data-tabsetid="9832">
-<div class="tab-pane active" data-value="Distributions" id="tab-9832-1">
+<div class="tab-content" data-tabsetid="2156">
+<div class="tab-pane active" data-value="Distributions" id="tab-2156-1">
 <div class="row">
-<div class="col-sm-6">
+<div class="col-sm-5">
 <div class="shiny-plot-output html-fill-item" id="latPlot" style="width:100%;height:300px;"></div>
 </div>
-<div class="col-sm-6">
+<div class="col-sm-7">
+<div class="shiny-plot-output html-fill-item" id="latPercentile" style="width:100%;height:300px;"></div>
+</div>
+<div class="col-sm-5">
 <div class="shiny-plot-output html-fill-item" id="lonPlot" style="width:100%;height:300px;"></div>
 </div>
+<div class="col-sm-7">
+<div class="shiny-plot-output html-fill-item" id="lonPercentile" style="width:100%;height:300px;"></div>
 </div>
 </div>
-<div class="tab-pane" data-value="Environmental" id="tab-9832-2">
+</div>
+<div class="tab-pane" data-value="Environmental" id="tab-2156-2">
 <div class="row">
 <div class="col-sm-6">
 <div class="shiny-plot-output html-fill-item" id="sstPlot" style="width:100%;height:250px;"></div>
@@ -3089,8 +3093,11 @@ vertical-align: -.125em;
 </div>
 </div>
 </div>
-<div class="tab-pane" data-value="Maps" id="tab-9832-3">
+<div class="tab-pane" data-value="Maps" id="tab-2156-3">
+<div class="row">
+<div class="col-sm-12">
 <div class="shiny-plot-output html-fill-item" id="seasonMap" style="width:100%;height:400px;"></div>
+</div>
 </div>
 </div>
 </div>
@@ -3115,65 +3122,54 @@ library(rnaturalearth)
 library(rsconnect)
 
 # Read in cleaned survey data ----
-clean_survey <- read_rds(here("data","clean_survey.rds")) |>
-  filter(!year %in% c(2017,2020))
+annual_centers <- read.csv(here("data", "annual_centers.csv"))
+seasonal_centers <- read.csv(here("data", "seasonal_centers.csv"))
+annual_percentiles <- read.csv(here("data", "annual_percentiles.csv"))
 
-## Contains species caught in >5 tows per year, and present in both seasons >80% of the years of the survey 
-## Does not include strata needed to compute stratified abundances 
-
-# Species list ----
-spp_class <- read_csv(here("data", "sppclass.csv"))
-spp_class <- janitor::clean_names(spp_class) |>
-  select(svspp, common_name) |>
-  mutate(comname = str_to_sentence(common_name)) |>
-  drop_na() |>
-  filter(comname %in% clean_survey$comname) |>
-  arrange(comname)
-
-# Biomass weighted means ----
-center_bio <- function(x, ...){
-  x |>
-    group_by(comname, ...) %>%
-    summarise(
-      decade          = 10*year%/%10,
-      # Un-weighted averages
-      total_biomass   = sum(total_biomass_kg),
-      avg_biomass     = mean(total_biomass_kg),
-      biomass_sd      = sd(total_biomass_kg),
-      # Weighted averages
-      avg_lat         = weightedMean(lat, w = total_biomass_kg, na.rm = T),  
-      avg_lon         = weightedMean(lon, w = total_biomass_kg, na.rm = T),
-      avg_sst         = weightedMean(surftemp, w = total_biomass_kg, na.rm = T),
-      avg_bot         = weightedMean(bottemp,  w = total_biomass_kg, na.rm = T),
-      avg_depth       = weightedMean(depth, w = total_biomass_kg, na.rm = T),
-      .groups = "drop")
-}
-
-# Plotting data ----
-weighted_dat  <- center_bio(clean_survey, year)
-seasonal_dat  <- center_bio(clean_survey, year, season)
-species <- spp_class$comname
+# Species input ----
+species <- annual_centers |>
+  select(comname) |> 
+  distinct()
+species <- species$comname
 
 # Basemaps ---- 
 usa <- ne_states(country = "united states of america", returnclass = "sf")
 can <- ne_states(country = "canada", returnclass = "sf") 
+
+# Means ----
+annual_means <- annual_centers |>
+  filter(year %in% c(1991:2022)) |> # 30 years with 2017,2020 removed
+  pivot_longer(cols = "avg_lat":"avg_depth", names_to = "variable", values_to = "measurement") |>
+  group_by(comname, variable) |>
+  summarise(mean = mean(measurement)) |>
+  pivot_wider(names_from = variable, values_from = "mean") |> 
+  rename_with(~ str_remove(., "avg_"), everything()) 
+
 </script>
  
 <script type="application/shiny-prerendered" data-context="server">
 # Filter data based on species selection ----
+
 ## seasonal data
 filtered_season <- reactive({
-  seasonal_dat |>
+  seasonal_centers |>
     filter(comname == input$comname)
 })
 
 ## annual data
 filtered_annual <- reactive({
-  weighted_dat |>
+  annual_centers |>
+    left_join(annual_means) |>
     filter(comname == input$comname)
 })
 
-# Map (annual for now...)
+## percentiles
+filtered_percentiles <- reactive({
+  annual_percentiles|>
+    filter(comname == input$comname)
+})
+
+# Map
 output$seasonMap <- renderPlot({
   ggplot() +
     geom_sf(data = usa) + geom_sf(data = can) +
@@ -3185,6 +3181,7 @@ output$seasonMap <- renderPlot({
     facet_wrap(~decade, nrow = 2) +
     scale_color_gmri() +
     theme_gmri(
+      axis.title = element_blank(),
       legend.position = "bottom", 
       strip.background = element_rect(fill = "transparent"),
       strip.text = element_text(color = "#000000"), 
@@ -3192,23 +3189,29 @@ output$seasonMap <- renderPlot({
       plot.margin = ( plot.margin = margin(0,0,0,0)))
 })
 
-# Lat plt
+# Lat plot
 output$latPlot <- renderPlot({
   ggplot(filtered_annual()) +
-      geom_line(aes(x=year, y=avg_lat), linewidth = 0.8)+
-      geom_point(aes(x = year, y = avg_lat),size=0.5) +
-      ggtitle("Center of latitude", subtitle = "Weighted by biomass") +
+      # geom_line(aes(x=year, y=(zoo::rollapplyr(avg_lat, width = 5, FUN = mean, align = "center", partial = T))), 
+      #           linetype = 2, color = "#b94a40", linewidth = 1) + 
+      geom_line(aes(x=year, y=avg_lat), linewidth = 0.8, alpha = 0.5)+
+      geom_line(aes(x=year, y=lat), linetype = 2, linewidth = 1, color = "#07a3b7") + 
+      ggtitle("Center of latitude", subtitle = "Average latitude weighted by biomass") +
+      ylab("Latitude") +
       theme_gmri(
+        axis.title.x  = element_blank(), 
         plot.subtitle = element_text(size = 11))
 })
 
-# Lon plt
+# Lon plot
 output$lonPlot <- renderPlot({
   ggplot(filtered_annual()) +
-      geom_line(aes(x=year, y=avg_lon), linewidth = 0.8)+
-      geom_point(aes(x = year, y = avg_lon),size=0.5) +
-      ggtitle("Center of longitude", subtitle = "Weighted by biomass") +
+      geom_line(aes(x=year, y=avg_lon), linewidth = 0.8, alpha = 0.5)+
+      geom_line(aes(x=year, y=lon), linetype = 2, linewidth = 1, color = "#ebcb27") +
+      ggtitle("Center of longitude", subtitle = "Average longitude weighted by biomass") +
+      ylab("Longitude") +
       theme_gmri(
+        axis.title.x  = element_blank(),
         plot.subtitle = element_text(size = 11))
 })
 
@@ -3216,10 +3219,12 @@ output$lonPlot <- renderPlot({
 # SST plot
 output$sstPlot <- renderPlot({
   ggplot(filtered_annual()) +
-      geom_line(aes(x=year, y=avg_sst), linewidth = 0.8)+
-      geom_point(aes(x = year, y = avg_sst),size=0.5) +
+      geom_line(aes(x=year, y=avg_sst), linewidth = 0.8, alpha = 0.5)+
+      geom_line(aes(x = year, y=sst), color = "#b94a40", linetype = 2, linewidth = 1) +
       ggtitle("Average Sea Surface Temperature", subtitle = "Weighted by biomass") +
-       theme_gmri(
+      ylab("Temperature") +
+      theme_gmri(
+        axis.title.x  = element_blank(),
         plot.subtitle = element_text(size = 11))
 })
 
@@ -3227,9 +3232,11 @@ output$sstPlot <- renderPlot({
 output$btPlot <- renderPlot({
   ggplot(filtered_annual()) +
       geom_line(aes(x=year, y=avg_bot), linewidth = 0.8)+
-      geom_point(aes(x = year, y = avg_bot),size=0.5) +
+      geom_line(aes(x = year, y = bot), color = "#004966", linetype = 2, linewidth = 1) +
       ggtitle("Average Bottom Temperature", subtitle = "Weighted by biomass") +
+      ylab("Temperature") +
       theme_gmri(
+        axis.title.x  = element_blank(),
         plot.subtitle = element_text(size = 11))
 })
 
@@ -3237,13 +3244,53 @@ output$btPlot <- renderPlot({
 output$depthPlot <- renderPlot({
   ggplot(filtered_annual()) +
       geom_line(aes(x=year, y=avg_depth), linewidth = 0.8)+
-      geom_point(aes(x = year, y = avg_depth),size=0.5) +
+      geom_line(aes(x = year, y = depth), color = "#773891", linetype = 2, linewidth = 1) +
       scale_y_reverse() +
       ggtitle("Average Depth", subtitle = "Weighted by biomass") +
+      ylab("Depth") +
       theme_gmri(
+        axis.title.x  = element_blank(),
         plot.subtitle = element_text(size = 11))
 })
 
+# Percentiles 
+## Lat
+output$latPercentile <- renderPlot({
+  ggplot(reactive({
+  annual_percentiles|>
+      mutate(factor = factor(percentiles, levels = c("5%","25%","50%","75%","95%"))) |>
+      filter(variable == "lat" & comname == input$comname)
+})()) +
+      geom_line(aes(x = year, y = roll_mean, color = factor), linetype = 2, linewidth = 1) +
+      geom_line(aes(x = year, y = measurement, color = factor), alpha = 0.25, linewidth = 1) +
+      ggtitle("Biomass-weighted latitude percentiles", subtitle = "5-year rolling mean represented by dashed line") +
+      ylab("Latitude") +
+      scale_color_gmri() +
+    theme_gmri(
+      axis.title.x = element_blank(),
+      plot.subtitle = element_text(size = 11),
+      legend.position = "right"
+    )
+})
+
+## Lon
+output$lonPercentile <- renderPlot({
+  ggplot(reactive({
+  annual_percentiles|>
+       mutate(factor = factor(percentiles, levels = c("5%","25%","50%","75%","95%"))) |>
+       filter(variable == "lon" & comname == input$comname)
+})()) +
+      geom_line(aes(x = year, y = roll_mean,   color = factor), linetype = 2, linewidth = 1) +
+      geom_line(aes(x = year, y = measurement, color = factor), alpha = 0.25, linewidth = 1) +
+      ggtitle("Biomass-weighted longitude percentiles", subtitle = "5-year rolling mean represented by dashed line") +
+      ylab("Longitude") +
+      scale_color_gmri() +
+    theme_gmri(
+      axis.title.x = element_blank(),
+      plot.subtitle = element_text(size = 11),
+      legend.position = "right"
+    )
+})
 </script>
  
 <script type="application/shiny-prerendered" data-context="server-extras">
@@ -3281,7 +3328,7 @@ ojs_define <- function(..., .session = shiny::getDefaultReactiveDomain()) {
 <!--html_preserve-->
 
 <script type="application/shiny-prerendered" data-context="execution_dependencies">
-{"type":"list","attributes":{"names":{"type":"character","attributes":{},"value":["packages"]}},"value":[{"type":"list","attributes":{"names":{"type":"character","attributes":{},"value":["packages","version"]},"class":{"type":"character","attributes":{},"value":["data.frame"]},"row.names":{"type":"integer","attributes":{},"value":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89]}},"value":[{"type":"character","attributes":{},"value":["archive","base","bit","bit64","bslib","cachem","class","classInt","cli","codetools","compiler","crayon","datasets","DBI","digest","dplyr","e1071","evaluate","farver","fastmap","forcats","generics","ggplot2","glue","gmRi","graphics","grDevices","grid","gtable","here","hms","htmltools","htmlwidgets","httpuv","httr","janitor","jquerylib","jsonlite","KernSmooth","knitr","later","lifecycle","lubridate","magrittr","matrixStats","memoise","methods","mime","parallel","pillar","pkgconfig","promises","proxy","purrr","R6","RColorBrewer","Rcpp","readr","rlang","rmarkdown","rnaturalearth","rnaturalearthhires","rprojroot","rsconnect","rstudioapi","sass","scales","sf","shiny","snakecase","stats","stringi","stringr","terra","tibble","tidyr","tidyselect","tidyverse","timechange","tools","tzdb","units","utils","vctrs","vroom","withr","xfun","xtable","yaml"]},{"type":"character","attributes":{},"value":["1.1.12","4.3.2","4.6.0","4.6.0-1","0.9.0","1.1.0","7.3-23","0.4-11","3.6.5","0.2-20","4.3.2","1.5.3","4.3.2","1.2.3","0.6.37","1.1.4","1.7-16","1.0.3","2.1.2","1.2.0","1.0.0","0.1.4","3.5.2","1.8.0","1.0.0","4.3.2","4.3.2","4.3.2","0.3.6","1.0.1","1.1.3","0.5.8.1","1.6.4","1.6.16","1.4.7","2.2.1","0.1.4","2.0.0","2.23-26","1.50","1.4.2","1.0.4","1.9.4","2.0.3","1.5.0","2.0.1","4.3.2","0.13","4.3.2","1.10.2","2.0.3","1.3.2","0.4-27","1.0.4","2.6.1","1.1-3","1.0.14","2.1.5","1.1.6","2.29","1.0.1","1.0.0.9000","2.0.4","1.4.1","0.17.1","0.4.10","1.4.0","1.0-21","1.10.0","0.11.1","4.3.2","1.8.7","1.5.1","1.8-50","3.2.1","1.3.1","1.2.1","2.0.0","0.3.0","4.3.2","0.5.0","0.8-7","4.3.2","0.6.5","1.6.5","3.0.2","0.52","1.8-4","2.3.10"]}]}]}
+{"type":"list","attributes":{"names":{"type":"character","attributes":{},"value":["packages"]}},"value":[{"type":"list","attributes":{"names":{"type":"character","attributes":{},"value":["packages","version"]},"class":{"type":"character","attributes":{},"value":["data.frame"]},"row.names":{"type":"integer","attributes":{},"value":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81]}},"value":[{"type":"character","attributes":{},"value":["base","bslib","cachem","class","classInt","cli","codetools","compiler","datasets","DBI","digest","dplyr","e1071","evaluate","farver","fastmap","forcats","generics","ggplot2","glue","gmRi","graphics","grDevices","grid","gtable","here","hms","htmltools","htmlwidgets","httpuv","httr","jquerylib","jsonlite","KernSmooth","knitr","later","lifecycle","lubridate","magrittr","matrixStats","memoise","methods","mime","pillar","pkgconfig","promises","proxy","purrr","R6","RColorBrewer","Rcpp","readr","rlang","rmarkdown","rnaturalearth","rnaturalearthhires","rprojroot","rsconnect","rstudioapi","sass","scales","sf","shiny","stats","stringi","stringr","terra","tibble","tidyr","tidyselect","tidyverse","timechange","tools","tzdb","units","utils","vctrs","withr","xfun","xtable","yaml"]},{"type":"character","attributes":{},"value":["4.3.2","0.9.0","1.1.0","7.3-23","0.4-11","3.6.5","0.2-20","4.3.2","4.3.2","1.2.3","0.6.37","1.1.4","1.7-16","1.0.3","2.1.2","1.2.0","1.0.0","0.1.4","3.5.2","1.8.0","1.0.0","4.3.2","4.3.2","4.3.2","0.3.6","1.0.1","1.1.3","0.5.8.1","1.6.4","1.6.16","1.4.7","0.1.4","2.0.0","2.23-26","1.50","1.4.2","1.0.4","1.9.4","2.0.3","1.5.0","2.0.1","4.3.2","0.13","1.10.2","2.0.3","1.3.2","0.4-27","1.0.4","2.6.1","1.1-3","1.0.14","2.1.5","1.1.6","2.29","1.0.1","1.0.0.9000","2.0.4","1.4.1","0.17.1","0.4.10","1.4.0","1.0-21","1.10.0","4.3.2","1.8.7","1.5.1","1.8-50","3.2.1","1.3.1","1.2.1","2.0.0","0.3.0","4.3.2","0.5.0","0.8-7","4.3.2","0.6.5","3.0.2","0.52","1.8-4","2.3.10"]}]}]}
 </script>
 <!--/html_preserve-->
 
