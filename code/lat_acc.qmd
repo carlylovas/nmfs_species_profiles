@@ -1,0 +1,137 @@
+---
+title: "Lat accumulation"
+subtitle: "Adapted from L.Carlson"
+format: html
+editor: visual
+execute: 
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: load libraries and data 
+
+## Libraries ----
+library(here)
+library(tidyverse)
+library(gmRi)
+library(Hmisc)
+library(readr)
+library(matrixStats)
+library(sf)
+library(janitor)
+
+trawl_dat        <- read_rds(here("data", "trawl_data_clean.rds")) # No species filtering 
+mid_atlantic_spp <- c("atlantic mackerel", "black sea bass", "bluefish", "butterfish", "atlantic surfclam", "spiny dogfish", "summer flounder", "chub mackerel", "king mackerel", "goosefish", "ocean quahog", "northern shortfin squid", "longfin squid", "tilefish", "scup")
+mgmt_zones       <- st_read(here("data/CouncilBoundryCCC", "Council_Scopes.shp"), quiet = TRUE) |>
+    filter(Council %in% c("New England", "Mid-Atlantic", "South Atlantic"))
+
+```
+
+### Biomass per trawl (maybe)
+
+### Center of biomass
+
+### lat \~ year
+
+### Percentiles
+
+```{r}
+#| label: percentiles
+
+percentiles <- trawl_dat |>
+  filter(comname %in% mid_atlantic_spp) |>
+  group_by(year, comname) |>
+  summarise(
+    `5%`  = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.05),
+    `10%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.10),
+    `15%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.15),
+    `25%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.25),
+    `50%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.50),
+    `75%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.75),
+    `90%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.90), 
+    `95%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.95))
+
+```
+
+### Partitions (?)
+
+### Percent of total biomass that falls within each percentile group by decade
+```{r}
+#| label: decadal
+#| fig-width: 7
+#| fig-height: 7
+
+trawl_dat |>
+   filter(comname %in% mid_atlantic_spp) |>
+   mutate(decade = 10*year%/%10) |>
+   group_by(decade, comname) |>
+   summarise(
+     # `5%`  = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.05),
+     `10%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.10),
+     # `15%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.15),
+     # `25%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.25),
+     `50%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.50),
+     # `75%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.75),
+     `90%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.90)) -> decade_bins
+     # `95%` = Hmisc::wtd.quantile(lat, weights = total_biomass_kg, probs = 0.95)) -> decade_bins
+
+trawl_dat |>
+  filter(comname %in% mid_atlantic_spp & total_biomass_kg >= 0.1) |>
+  mutate(decade = 10*year%/%10) |>
+  select(comname, year, decade, lat, lon, total_biomass_kg) |>
+  left_join(decade_bins) |>
+  group_by(comname, decade) |>
+  mutate(partition = case_when(
+    lat <= `10%` ~ "Trailing", 
+    lat > `10%` & lat < `90%` ~ "Center",
+    lat >= `90%` ~ "Leading"
+)) -> lat_accumulation
+
+lat_accumulation |> 
+  mutate(partition = factor(partition, levels = c("Trailing","Center","Leading"))) |>
+  arrange(year,comname, partition) |>
+  filter(!comname == "king mackerel") |> # can't calculate stat density
+  group_by(comname) |>
+  nest() |>
+  mutate(map = map2(data, comname, function(x,y){
+    # base maps
+    usa <- rnaturalearth::ne_states(country = "united states of america", returnclass = "sf")
+    can <- rnaturalearth::ne_states(country = "canada", returnclass = "sf") 
+    mgmt_zones <- st_read(here("data/CouncilBoundryCCC", "Council_Scopes.shp"), quiet = TRUE) |>
+      filter(Council %in% c("New England", "Mid-Atlantic", "South Atlantic"))
+
+    # map
+    ggplot() + 
+      geom_sf(data = usa) + geom_sf(data = can) + geom_sf(data = mgmt_zones, fill = "transparent") +
+      coord_sf(ylim = c(35,45), xlim = c(-66,-78)) + 
+      geom_point(data = x, aes(x = lon, y = lat, color = partition, group = partition, alpha = total_biomass_kg)) + 
+      stat_density2d(data = x, aes(x = lon, y = lat), alpha = 0.2, color = "#535353") +
+      guides(color = guide_legend(title = "Biomass distributions"),
+             alpha = guide_legend(title = "Biomass (kg)")) +
+      scale_x_continuous(breaks = c(-66, -70, -74, -78)) +
+      scale_color_gmri() +
+      facet_wrap(~decade) +
+      labs(
+        title = str_to_sentence(comname),
+        subtitle = "'Center' represents 80% of the distributed biomass"
+      ) +
+      theme(text = element_text("Avenir"),
+            axis.title = element_blank(),
+            legend.position = "bottom",
+            legend.box = "vertical",
+            strip.background = element_blank(),
+            strip.text = element_text(hjust = 0),
+            panel.grid.major = element_line(color = "#e9e9e9", linewidth = 0.5, linetype = 3),
+            panel.grid.minor = element_blank(),
+            panel.background = element_rect(fill = "transparent"),
+            panel.border = element_rect(fill = "transparent", linetype = 1, linewidth = 0.5, color = "#535353"))
+  })) -> lat_accumulation
+
+# lat_accumulation$map[[1]]
+
+gridExtra::marrangeGrob(lat_accumulation$map, layout_matrix = matrix(1:1, ncol = 1, nrow = 1, byrow= TRUE), top = NULL)
+```
+
+### N-S of center

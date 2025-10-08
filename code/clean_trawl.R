@@ -73,33 +73,34 @@ trawldat <- dplyr::filter(trawldat, year >= 1970)
 dat_clean <- trawldat |>
   distinct(id, svspp, catchsex, comname, year, est_month, est_day, season, lat, lon, surftemp, bottemp, depth, est_towdate, biomass_kg) |>
   group_by(id, svspp, comname, year, est_month, est_day, season, lat, lon, surftemp, bottemp, depth, est_towdate) |>
-  summarize("total_biomass_kg" = sum(biomass_kg)) |>
+  summarise("total_biomass_kg" = sum(biomass_kg)) |>
   ungroup()
+
+write_rds(dat_clean, here("data","trawl_data_clean.rds"))
 
 # Species filtering ----
 # Keep only species that were observed in at least 5 tows for each season and then in both seasons for at least 80% of survey years.
-tow_spp <- dat_clean |>
-  group_by(svspp, comname, year, season) |>
-  summarise(tows = n_distinct(id)) |>
-  filter(tows >= 5)
+# tow_spp <- dat_clean |>
+#   group_by(svspp, comname, year, season) |>
+#   summarise(tows = n_distinct(id)) |>
+#   filter(tows >= 5)
 
 # 80% cut off (49 years)
-cut <- (max(tow_spp$year) - min(tow_spp$year)) - floor(0.08 * (max(tow_spp$year) - min(tow_spp$year)))
+# cut <- (max(tow_spp$year) - min(tow_spp$year)) - floor(0.08 * (max(tow_spp$year) - min(tow_spp$year)))
+# 
+# tow_seas_spp <- tow_spp |>
+#   # 80% of years have both spring and fall
+#   group_by(svspp, comname, year) |>
+#   summarise(seasons = n_distinct(season)) |>
+#   filter(seasons == 2) |>
+#   group_by(svspp, comname) |>
+#   summarise(years = n_distinct(year)) |>
+#   filter(years >= cut)
+# 
+# # Summaries and saving prepped data ----
+# dat_out <- dat_clean |>
+#   filter(comname %in% tow_seas_spp$comname) |>
+#   mutate(comname = str_to_sentence(comname)) |>
+#   filter(!year %in% c(2017,2020))
 
-tow_seas_spp <- tow_spp |>
-  # 80% of years have both spring and fall
-  group_by(svspp, comname, year) |>
-  summarise(seasons = n_distinct(season)) |>
-  filter(seasons == 2) |>
-  group_by(svspp, comname) |>
-  summarise(years = n_distinct(year)) |>
-  filter(years >= cut)
-
-# Summaries and saving prepped data ----
-dat_out <- dat_clean |>
-  filter(comname %in% tow_seas_spp$comname) |>
-  mutate(comname = str_to_sentence(comname)) |>
-  filter(!year %in% c(2017,2020))
-
-write_rds(dat_out, here("data","clean_survey.rds"))
-
+# write_rds(dat_out, here("data","clean_survey.rds"))

@@ -1,0 +1,279 @@
+---
+title: "Mid-atlantic species distribution metrics"
+format: html
+editor: visual
+---
+
+```{r}
+#| label: load libraries and dependences 
+#| echo: false
+#| message: false
+#| warning: false
+
+## Libraries ----
+library(here)
+library(tidyverse)
+library(gmRi)
+library(Hmisc)
+library(readr)
+library(matrixStats)
+library(sf)
+library(janitor)
+
+trawl_dat        <- read_rds(here("data", "trawl_dat_clean.rds")) # No species filtering 
+mid_atlantic_spp <- c("atlantic mackerel", "black sea bass", "bluefish", "butterfish", "atlantic surfclam", "spiny dogfish", "summer flounder", "chub mackerel", "king mackerel", "goosefish", "ocean quahog", "northern shortfin squid", "longfin squid", "tilefish", "scup")
+mgmt_zones       <- st_read(here("data/CouncilBoundryCCC", "Council_Scopes.shp")) |>
+    filter(Council %in% c("New England", "Mid-Atlantic", "South Atlantic"))
+
+```
+
+```{r}
+#| label: center of biomass
+#| echo: false
+#| warning: false
+#| message: false
+
+## Dist metrics ----
+trawl_dat <- trawl_dat |>
+  filter(comname %in% mid_atlantic_spp & !year %in% c(2017,2020)) # will add back in as NAs
+
+centerbio <- trawl_dat |>
+  group_by(year, comname) |>
+  summarise(
+    avg_lat = weightedMean(lat, w = total_biomass_kg, na.rm = T),
+    avg_lon = weightedMean(lon, w = total_biomass_kg, na.rm = T)
+  ) |>
+  full_join(data.frame(comname = rep(mid_atlantic_spp,2), year = c(2017,2020), avg_lat = NA, avg_lon = NA)) |>
+  arrange(comname, year)
+
+
+centerbio$comname[centerbio$comname == "goosefish"] = "monkfish"
+
+## Maps ----
+usa <- rnaturalearth::ne_states(country = "united states of america", returnclass = "sf")
+can <- rnaturalearth::ne_states(country = "canada", returnclass = "sf")
+
+ggplot() +
+  geom_sf(data = usa) + geom_sf(data = can) + geom_sf(data = mgmt_zones, fill = "transparent") +
+  coord_sf(ylim = c(35,45), xlim = c(-66,-78)) +
+  geom_point(data = centerbio, aes(x = avg_lon, y = avg_lat, color = year)) +
+  guides(col = guide_legend(title = "Decade", nrow = 1)) + 
+  # scale_x_continuous(breaks = c(-78, -74, -70, -66)) +
+  scale_x_continuous(breaks = c(-77, -74, -71, -68)) +
+  facet_wrap(~str_to_sentence(comname), ncol = 5) +
+  labs(title = "Biomass centers",
+       y = "Latitude",
+       x = "Longitude") +
+  theme(text = element_text("Avenir"),
+        legend.position = "bottom",
+        strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        panel.grid.major = element_line(color = "#e9e9e9", linewidth = 0.5, linetype = 3),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent"),
+        panel.border = element_rect(fill = "transparent", linetype = 1, linewidth = 0.5, color = "#535353"))
+
+ggsave("centroid_maps.png", width = 9)
+```
+
+```{r}
+#| label: leading-trailing edges
+#| echo: false
+#| message: false
+#| warning: false
+
+edges <- trawl_dat |>
+  group_by(year, comname) |>
+  summarise(
+    leading  = wtd.quantile(lat, weights = total_biomass_kg, probs = 0.90),
+    trailing = wtd.quantile(lat, weights = total_biomass_kg, probs = 0.10)
+  ) |>
+  full_join(data.frame(comname = rep(mid_atlantic_spp, 2), year = c(2017, 2020), leading = NA, trailing = NA)) |>
+  arrange(comname, year)
+
+edges$comname[edges$comname == "goosefish"] = "monkfish"
+
+## Plot with centers ----
+centerbio |>
+  full_join(edges) |>
+  select(!avg_lon) |> 
+  rename("center" = "avg_lat") |>
+  pivot_longer(cols = c(center, leading, trailing), names_to = "metric", values_to = "latitude") |>
+  mutate(metric = factor(metric, levels = c("leading", "center", "trailing"))) -> latitudes
+
+ggplot(latitudes) +
+  geom_line(aes(x = year, y = latitude, color = metric), alpha = 0.7, linetype = 2) +
+  geom_smooth(aes(x = year, y = latitude, color = metric), alpha = 0.5, method = "lm", se = FALSE, fill = "#e9e9e9") +
+  scale_color_gmri() +
+  guides(col = guide_legend(title = "Edges")) +
+  labs(
+    title = "Leading, center, and trailing edges of distribution",
+    y = "Latitude",
+    x = "Year",
+  ) +
+  facet_wrap(~str_to_sentence(comname), scales = "free_y", nrow = 5) +
+  theme(text = element_text("Avenir"),
+        strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        panel.grid.major.y = element_line(color = "#535353", linewidth = 0.5, linetype = 3),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent"),
+        panel.border = element_rect(fill = "transparent", linetype = 1, linewidth = 0.5, color = "#535353"))
+
+ggsave("biomass_distributions.png", width = 10)
+```
+
+```{r}
+#| label: biomass proportions
+#| echo: false
+#| message: false
+#| warning: false
+
+## Create spatial data ----
+sf_use_s2(FALSE)
+
+trawl_sf <- trawl_dat |>
+  select(comname, year, lat, lon, total_biomass_kg) |> 
+  full_join(data.frame(comname = rep(mid_atlantic_spp,2), year = c(2017, 2020), lat = NA, lon = NA)) |>
+  st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE, na.fail = FALSE)
+
+## Overlap with Mgmt zones ----
+trawl_sf <-trawl_sf |>
+    st_join(mgmt_zones, join = st_intersects)
+
+## Calc proportion ----
+biomass_prop <- trawl_sf |>
+  st_drop_geometry() |>
+  filter(!is.na(Council)) |>
+  group_by(Council, comname, year) |>
+  summarise(biom = sum(total_biomass_kg, na.rm = TRUE)) |>
+  ungroup() |>
+  group_by(comname, year) |>
+  mutate(total = sum(biom),
+         prop_biomass = biom/total) |>
+  mutate(Council = factor(Council, levels = c("New England", "Mid-Atlantic", "South Atlantic")))
+
+## Plot ----
+ggplot(biomass_prop, aes(x = year, y = prop_biomass, fill = Council, group = Council)) +
+  geom_col() +
+  facet_wrap(~str_to_sentence(comname), ncol = 3) +
+  # scale_y_continuous(limits = c(0,1), labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Proportion of Total NEFSC Bottom Trawl Biomass \nby Species in Each Council Region",
+    y = "Proportion of Total Biomass",
+    x = "Year",
+  ) +
+  scale_fill_manual(values = c("#363b45", "#00608a","#C1DEFF")) +
+  theme(text = element_text("Avenir"),
+        legend.title = element_blank(),
+        legend.position = "bottom",
+        strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        panel.grid.major.y = element_line(color = "#e9e9e9", linewidth = 0.3, linetype = 3),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent"),
+        panel.border = element_rect(fill = "transparent", linetype = 1, linewidth = 0.5, color = "#535353"))
+
+ggsave("biomass_proportion.png", width = 8)
+```
+
+```{r}
+#| label: lat accumulation
+#| echo: false
+#| message: true
+#| warning: true 
+
+trawl_dat |>
+  group_by(year, comname) |>
+  filter(comname == "atlantic mackerel") |>
+  summarise(
+    `95%`  = wtd.quantile(lat, weights = total_biomass_kg, probs = 0.95),
+    `90%`  = wtd.quantile(lat, weights = total_biomass_kg, probs = 0.90),
+    `75%`  = wtd.quantile(lat, weights = total_biomass_kg, probs = 0.75),
+    `50%`  = wtd.quantile(lat, weights = total_biomass_kg, probs = 0.50),
+    `25%`  = wtd.quantile(lat, weights = total_biomass_kg, probs = 0.25),
+    `10%`  = wtd.quantile(lat, weights = total_biomass_kg, probs = 0.10),
+    `5%`   = wtd.quantile(lat, weights = total_biomass_kg, probs = 0.5),
+  ) |>
+  # full_join(data.frame(comname = rep(mid_atlantic_spp, 2), year = c(2017, 2020), leading = NA, trailing = NA)) |>
+  arrange(comname, year) -> test
+
+ggplot(data = trawl_dat |> filter(comname == "atlantic_mackerel" & year == "2023")) +
+  scale_y_continuous(breaks = c(36,40,44)) + scale_x_continuous(breaks = c(-72,-66)) +
+  stat_density2d(aes(x = lon, y = lat),color = "#636363") 
+
+```
+
+```{r}
+#| label: demo
+
+# Maps
+ggplot() +
+  geom_sf(data = usa) + geom_sf(data = can) + geom_sf(data = mgmt_zones, fill = "transparent") +
+  coord_sf(ylim = c(35,45), xlim = c(-66,-78)) +
+  geom_point(data = (centerbio |> filter(comname == "atlantic mackerel")), aes(x = avg_lon, y = avg_lat, color = year)) +
+  guides(col = guide_legend(title = "Decade", nrow = 1)) + 
+  # scale_x_continuous(breaks = c(-78, -74, -70, -66)) +
+  scale_x_continuous(breaks = c(-77, -74, -71, -68)) +
+  facet_wrap(~str_to_sentence(comname), ncol = 5) +
+  labs(title = "Biomass centers",
+       y = "Latitude",
+       x = "Longitude") +
+  theme(text = element_text("Avenir"),
+        legend.position = "bottom",
+        strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        panel.grid.major = element_line(color = "#e9e9e9", linewidth = 0.5, linetype = 3),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent"),
+        panel.border = element_rect(fill = "transparent", linetype = 1, linewidth = 0.5, color = "#535353"))
+
+ggsave(here("images","demo_p7.png"))
+
+# edges
+ggplot(latitudes |> filter(comname == "atlantic mackerel")) +
+  geom_line(aes(x = year, y = latitude, color = metric), alpha = 0.7, linetype = 2) +
+  geom_smooth(aes(x = year, y = latitude, color = metric), alpha = 0.5, method = "lm", se = FALSE, fill = "#e9e9e9") +
+  scale_color_gmri() +
+  guides(col = guide_legend(title = "Edges")) +
+  labs(
+    title = "Leading, center, and trailing edges of distribution",
+    y = "Latitude",
+    x = "Year",
+  ) +
+  facet_wrap(~str_to_sentence(comname), scales = "free_y", nrow = 5) +
+  theme(text = element_text("Avenir"),
+        legend.position = "bottom",
+        strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        panel.grid.major.y = element_line(color = "#535353", linewidth = 0.5, linetype = 3),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent"),
+        panel.border = element_rect(fill = "transparent", linetype = 1, linewidth = 0.5, color = "#535353"))
+
+ggsave(here("images","demo_p8.png"))
+
+# proportion
+ggplot((biomass_prop |> filter(comname == "atlantic mackerel")), aes(x = year, y = prop_biomass, fill = Council, group = Council)) +
+  geom_col() +
+  facet_wrap(~str_to_sentence(comname), ncol = 3) +
+  # scale_y_continuous(limits = c(0,1), labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Proportion of Total NEFSC Bottom Trawl Biomass \nby Species in Each Council Region",
+    y = "Proportion of Total Biomass",
+    x = "Year",
+  ) +
+  scale_fill_manual(values = c("#363b45", "#00608a","#C1DEFF")) +
+  theme(text = element_text("Avenir"),
+        legend.title = element_blank(),
+        legend.position = "bottom",
+        strip.background = element_blank(),
+        strip.text = element_text(hjust = 0),
+        panel.grid.major.y = element_line(color = "#e9e9e9", linewidth = 0.3, linetype = 3),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "transparent"),
+        panel.border = element_rect(fill = "transparent", linetype = 1, linewidth = 0.5, color = "#535353"))
+
+ggsave(here("images","demo_p9.png"))
+```
+
