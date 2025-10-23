@@ -111,7 +111,8 @@ lat_accumulation |>
       guides(color = guide_legend(title = "Biomass distributions"),
              alpha = guide_legend(title = "Biomass (kg)")) +
       scale_x_continuous(breaks = c(-66, -70, -74, -78)) +
-      scale_color_gmri() +
+      scale_color_manual(values = c("#363b45", "#00608a","#C1DEFF")) +
+      # scale_color_gmri() +
       facet_wrap(~decade) +
       labs(
         title = str_to_sentence(comname),
@@ -129,9 +130,48 @@ lat_accumulation |>
             panel.border = element_rect(fill = "transparent", linetype = 1, linewidth = 0.5, color = "#535353"))
   })) -> lat_accumulation
 
-# lat_accumulation$map[[1]]
+# lat_accumulation$map[[1]] # note: there's something interesting happening with mackerel; it's fairly concentrated in the mid-Atlantic, cut off by Georges, until the 2010s when they appear to come around Georges and infiltrate the Gulf of Maine...
+# ggsave("atl_mackerel_example.png")
 
 gridExtra::marrangeGrob(lat_accumulation$map, layout_matrix = matrix(1:1, ncol = 1, nrow = 1, byrow= TRUE), top = NULL)
+
+lat_accumulation |>
+  mutate(histogram = map2(data, comname, function(x,y){
+    temp <- x |>
+      select(decade, lat, `10%`, `90%`, partition) |>
+      pivot_longer(cols = `10%`:`90%`, names_to = "percentile", values_to = "lat_bins") |>
+      mutate(n = 1,
+             lat = round(lat, digits = 1)) |> 
+      group_by(lat) |>
+      mutate(count = sum(n)) 
+    
+    ggplot(data = temp)+
+      geom_col(aes(x = lat, y = count, fill = partition), position = "dodge") +
+      geom_vline(aes(xintercept = lat_bins), color = "#535353", linewidth = 0.3, linetype = 1) +
+      scale_fill_manual(values = c("#363b45", "#00608a","#C1DEFF")) +
+      xlim(c(35, 45)) +
+      labs(
+        title = str_to_sentence(comname),
+        xlab = "Latitude",
+        ylab = "Count"
+      ) + 
+      facet_wrap(~decade) +
+          theme(text = element_text("Avenir"),
+                axis.title = element_blank(),
+                legend.position = "bottom",
+                legend.title = element_blank(),
+                legend.box = "vertical",
+                strip.background = element_blank(),
+                strip.text = element_text(hjust = 0),
+                panel.grid.major = element_line(color = "#e9e9e9", linewidth = 0.5, linetype = 3),
+                panel.grid.minor = element_blank(),
+                panel.background = element_rect(fill = "transparent"),
+                panel.border = element_rect(fill = "transparent", linetype = 1, linewidth = 0.5, color = "#535353"))
+  })) -> lat_accumulation
+
+# lat_accumulation$histogram[[1]]
+
+gridExtra::marrangeGrob(lat_accumulation$histogram, layout_matrix = matrix(1:1, ncol = 1, nrow = 1, byrow= TRUE), top = NULL)
 ```
 
 ### N-S of center
